@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Assistant</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+/* Metro-line identity: places = line colours, the day = a line with stations. */
+:root{
+  --paper:#E9EDF4; --surface:#FFFFFF; --sunk:#DDE3EE; --ink:#16203A; --muted:#66708A; --rule:#CBD3E1;
+  --red:#D7263D; --blue:#2754C5; --green:#13955F; --violet:#7B3FC4; --amber:#E39B0B; --teal:#0E8C9A;
+  --accent:var(--blue); --on-accent:#fff; --ok:var(--green); --danger:var(--red); --warn:var(--amber);
+  --display:"Unbounded","Golos Text",system-ui,sans-serif; --body:"Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --r-lg:22px; --r-md:14px; --r-sm:10px;
+}
+:root[data-theme="dark"]{
+  --paper:#0E1530; --surface:#17203F; --sunk:#222C4F; --ink:#EEF2FB; --muted:#98A2BF; --rule:#2C375C;
+  --red:#FF5468; --blue:#6E95FF; --green:#33C487; --violet:#B184F5; --amber:#FFBE3D; --teal:#3CC3D1;
+  --on-accent:#0E1530;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font:15px/1.45 var(--body);-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+header{position:sticky;top:0;z-index:20;background:var(--paper);padding:12px 14px 8px}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.tabs button{border:0;background:var(--surface);padding:9px 4px 10px;border-radius:var(--r-md);font-weight:600;font-size:14px;
+  position:relative;color:var(--muted)}
+.tabs button::after{content:"";position:absolute;left:18%;right:18%;bottom:5px;height:3px;border-radius:3px;background:var(--line,var(--accent));opacity:0;transition:opacity .2s}
+.tabs button.on{color:var(--ink)} .tabs button.on::after{opacity:1}
+#tab-sched{--line:var(--red)} #tab-fin{--line:var(--green)} #tab-trans{--line:var(--blue)}
+main{padding:6px 14px 120px;max-width:640px;margin:0 auto}
+
+/* generic blocks reused by sheets & lists */
+.card{background:var(--surface);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:12px}
+.row{display:flex;align-items:center;gap:8px} .between{justify-content:space-between}
+.hint{color:var(--muted);font-size:13.5px} .small{font-size:13px}
+h3{margin:0 0 8px;font:600 15px var(--body)}
+.btn{border:0;border-radius:var(--r-md);padding:11px 16px;background:var(--accent);color:var(--on-accent);font-weight:600}
+.btn.sec{background:var(--sunk);color:var(--ink)} .btn.red{background:var(--danger);color:#fff}
+.btn.full{width:100%} .btn.sm{padding:7px 11px;font-size:13.5px}
+.btn.on{box-shadow:inset 0 0 0 2px var(--accent)}
+.link{color:var(--accent);background:none;border:0;padding:4px;font-weight:600;font-size:14px}
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 5px;font-weight:500}
+input,select{width:100%;padding:11px 12px;border-radius:var(--r-sm);border:1.5px solid transparent;background:var(--sunk);
+  color:var(--ink);font:16px var(--body)}
+input:focus,select:focus{border-color:var(--accent);outline:none}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:0;border-radius:999px;padding:7px 12px;background:var(--sunk);font-size:14px;font-weight:500}
+.chip.on{background:var(--accent);color:var(--on-accent)}
+.seg{display:flex;background:var(--sunk);border-radius:var(--r-sm);padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:none;padding:8px;border-radius:8px}
+.seg button.on{background:var(--surface);font-weight:600}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px} .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stack>*+*{margin-top:8px}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.in{color:var(--green)}
+.tx{display:flex;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--rule)}
+.tx:first-of-type{border-top:0} .tx .m{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx.del{opacity:.4;text-decoration:line-through}
+.empty{color:var(--muted);text-align:center;padding:28px 8px}
+
+/* ---- schedule: the day as a metro line ---- */
+.dayhead{display:flex;align-items:flex-end;justify-content:space-between;margin:6px 2px 12px}
+.dayhead h1{font:700 26px/1.05 var(--display);margin:0;letter-spacing:-.01em}
+.dayhead .sub{color:var(--muted);margin-top:4px;font-weight:500}
+.dayhead .nav{display:flex;gap:6px}
+.round{width:40px;height:40px;border-radius:50%;border:0;background:var(--surface);font-size:16px;display:grid;place-items:center}
+.round.add{background:var(--ink);color:var(--paper);font-size:22px;line-height:1}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:14px}
+.wd{border:0;background:var(--surface);border-radius:var(--r-md);padding:7px 0 8px;text-align:center}
+.wd b{display:block;font:600 16px var(--display)} .wd span{font-size:12px;color:var(--muted)}
+.wd i{display:flex;justify-content:center;gap:2px;height:6px;margin-top:4px}
+.wd i u{width:5px;height:5px;border-radius:50%;background:var(--muted);text-decoration:none}
+.wd.sel{background:var(--ink);color:var(--paper)} .wd.sel span{color:inherit;opacity:.7}
+.wd.today:not(.sel){box-shadow:inset 0 0 0 2px var(--ink)}
+.line{position:relative;padding:4px 0 4px}
+.stop{position:relative;display:grid;grid-template-columns:62px 26px 1fr;align-items:start;padding:2px 0;cursor:pointer}
+.stop .tm{text-align:right;padding-top:9px;font-weight:600;font-variant-numeric:tabular-nums}
+.stop .tm small{display:block;color:var(--muted);font-weight:500}
+.stop .rail{position:relative;height:100%;min-height:62px}
+.stop .rail::before{content:"";position:absolute;left:11px;top:0;bottom:0;width:4px;background:var(--c);border-radius:2px}
+.stop:first-child .rail::before{top:14px} .stop:last-child .rail::before{bottom:calc(100% - 22px)}
+.stop .rail::after{content:"";position:absolute;left:4px;top:11px;width:18px;height:18px;border-radius:50%;background:var(--surface);
+  box-shadow:inset 0 0 0 4px var(--c)}
+.stop .body{background:var(--surface);border-radius:var(--r-md);padding:10px 13px;margin:2px 0 8px;border-left:4px solid var(--c)}
+.stop .body b{font-weight:600;font-size:15.5px}
+.stop .pl{color:var(--muted);font-size:13.5px;margin-top:1px}
+.stop.pending .body{outline:2px dashed var(--amber);outline-offset:-2px}
+.trip{display:grid;grid-template-columns:62px 26px 1fr;align-items:center;font-size:13.5px}
+.trip .rail{height:100%;min-height:34px;background:repeating-linear-gradient(to bottom,var(--c) 0 5px,transparent 5px 10px);width:4px;margin-left:11px}
+.trip .tm{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:var(--c)}
+.trip .what{color:var(--muted);padding:6px 0}
+.plate{display:inline-block;min-width:30px;padding:1px 7px;border-radius:7px;background:var(--amber);color:#1b1300;font:700 13px var(--display);text-align:center}
+.free{background:var(--surface);border-radius:var(--r-lg);padding:26px 18px;text-align:center}
+.free h2{font:700 20px var(--display);margin:0 0 6px}
+.foot{color:var(--muted);font-size:12.5px;text-align:center;margin-top:10px}
+
+/* ---- finance ---- */
+.money-hero{background:var(--ink);color:var(--paper);border-radius:var(--r-lg);padding:18px 18px 16px;margin-bottom:12px}
+.money-hero .lbl{opacity:.7;font-size:13.5px}
+.money-hero .big{font:700 32px/1.1 var(--display);margin:4px 0 14px;letter-spacing:-.02em}
+.money-hero .big small{font:600 14px var(--body);opacity:.7;margin-left:6px}
+.strip{display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px;background:color-mix(in srgb,var(--paper) 18%,transparent)}
+.strip i{display:block;height:100%}
+.inout{display:flex;gap:18px;margin-top:12px;font-size:14px} .inout b{display:block;font:600 16px var(--display)}
+.legend .row{padding:7px 0;border-top:1px solid var(--rule)} .legend .row:first-child{border-top:0}
+.dot{width:10px;height:10px;border-radius:3px;flex:none}
+.rail2{height:8px;border-radius:4px;background:var(--sunk);overflow:hidden;margin-top:6px}
+.rail2>i{display:block;height:100%;background:var(--green);border-radius:4px}
+.rail2>i.warn{background:var(--amber)} .rail2>i.over{background:var(--red)}
+
+/* ---- transit ---- */
+.mapwrap{position:relative;margin:0 -14px 12px}
+#map{height:360px;z-index:1}
+.mapbar{position:absolute;z-index:5;left:12px;right:12px;top:12px;display:flex;gap:6px}
+.mapbar input{background:var(--surface);box-shadow:0 2px 10px rgba(20,30,60,.18);border-radius:999px;padding:10px 16px}
+.mapbar .btn{border-radius:999px;box-shadow:0 2px 10px rgba(20,30,60,.18)}
+.mapchips{position:absolute;z-index:5;left:12px;right:12px;bottom:12px}
+.mapchips .chip{box-shadow:0 2px 8px rgba(20,30,60,.2);background:var(--surface)}
+.tools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.ticket{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px dashed var(--rule)}
+.ticket:first-of-type{border-top:0}
+.ticket .m{flex:1;min-width:0} .ticket .m b{font-weight:600}
+.leaflet-tooltip{font:600 12px var(--body);padding:2px 7px;border-radius:6px}
+.leaflet-container{font-family:var(--body)}
+
+/* ---- sheets, toast, save bar ---- */
+.sheet-bg{position:fixed;inset:0;background:rgba(10,16,35,.45);z-index:50;display:none}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:51;background:var(--surface);border-radius:24px 24px 0 0;
+  padding:10px 16px 26px;max-height:88vh;overflow:auto;display:none;animation:up .22s ease-out}
+.sheet::before{content:"";display:block;width:40px;height:4px;border-radius:2px;background:var(--rule);margin:0 auto 12px}
+.sheet h2{margin:0 0 4px;font:700 19px var(--display)}
+@keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+#toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;
+  border-radius:999px;font-size:14px;z-index:60;display:none;max-width:90%;text-align:center}
+#savebar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px 16px;background:linear-gradient(transparent,var(--paper) 30%);z-index:30;display:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="tabs" id="tabs">
+    <button data-tab="sched" class="on" id="tab-sched"></button>
+    <button data-tab="fin" id="tab-fin"></button>
+    <button data-tab="trans" id="tab-trans"></button>
+  </div>
+</header>
+<main id="main"></main>
+<div class="sheet-bg" id="sheetbg"></div>
+<div class="sheet" id="sheet"></div>
+<div id="savebar"><div class="row"><button class="btn sec" id="resetbtn"></button><button class="btn full" id="savebtn"></button></div></div>
+<div id="toast"></div>
+<script>
+"use strict";
+const tg = (window.Telegram && window.Telegram.WebApp) || null;
+const IN_TG = !!(tg && tg.initData !== undefined && tg.platform && tg.platform !== "unknown");
+let D = null, LANG = "ru";
+const T = (en, ru) => (LANG === "ru" ? ru : en);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const $ = id => document.getElementById(id);
+const WD = () => LANG === "ru" ? ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"] : ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const WDL = () => LANG === "ru" ? ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"]
+                              : ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+
+// ---------------------------------------------------------------- dates (strings YYYY-MM-DD, local)
+const pad = n => String(n).padStart(2, "0");
+const toDate = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const fmtD = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const addDays = (s, n) => { const d = toDate(s); d.setDate(d.getDate() + n); return fmtD(d); };
+const wdOf = s => (toDate(s).getDay() + 6) % 7;
+const ddmm = s => `${s.slice(8, 10)}.${s.slice(5, 7)}`;
+const toMin = hhmm => { const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || ""); return m ? +m[1] * 60 + +m[2] : null; };
+const fromMin = m => { m = ((m % 1440) + 1440) % 1440; return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; };
+const money = v => Math.round(v).toLocaleString("ru-RU").replace(/ /g, " ");
+
+function parseAmount(s) {
+  s = String(s || "").toLowerCase().replace(/\s+/g, "").replace(/сум|uzs|so'm|sum/g, "");
+  const m = /^([\d.,]+)(k|к|тыс|m|м|млн|mln)?$/.exec(s);
+  if (!m) return null;
+  let n = m[1];
+  if (n.includes(",") && n.includes(".")) n = n.replace(/[.,](?=\d{3}(\D|$))/g, "");
+  else if (/^\d{1,3}([.,]\d{3})+$/.test(n)) n = n.replace(/[.,]/g, "");
+  else n = n.replace(",", ".");
+  const v = parseFloat(n);
+  if (!isFinite(v)) return null;
+  const mult = {k: 1e3, "к": 1e3, "тыс": 1e3, m: 1e6, "м": 1e6, "млн": 1e6, mln: 1e6}[m[2]] || 1;
+  return v * mult;
+}
+
+// ---------------------------------------------------------------- data
+async function decodeData() {
+  let d = new URLSearchParams(location.search).get("d");
+  if (!d) d = new URLSearchParams(location.hash.slice(1)).get("d");
+  if (!d) return null;
+  const b64 = d.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((d.length + 3) % 4);
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  if (typeof DecompressionStream === "undefined") throw new Error("no DecompressionStream");
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"));
+  return JSON.parse(await new Response(stream).text());
+}
+
+let M; // working model (local preview of pending changes)
+let P; // pending changes to send
+let tmpId = -1;
+function initModel() {
+  M = {
+    events: D.e.map(a => ({id: a[0], title: a[1], start: a[2], end: a[3], date: a[4], wd: a[5] ? a[5].split(",").map(Number) : [],
+                           place: a[6], remind: a[7]})),
+    skips: new Set(D.k.map(a => a[0] + "|" + a[1])),
+    places: D.p.map(a => ({id: a[0], name: a[1], lat: a[2], lon: a[3], home: !!a[4], travel: a[5]})),
+    lines: D.n.map(a => ({id: a[0], place: a[1], name: a[2], stop: a[3], first: a[4], last: a[5], headway: a[6], wt: a[7],
+                          ride: a[8], wf: a[9], from: a[10] || 0, exit: a[11] || ""})),
+    tx: D.x.map(a => ({id: a[0], ts: a[1], dir: a[2], amount: a[3], cur: a[4], merchant: a[5], cat: a[6]})),
+    fin: {inc: D.f.in, cats: Object.fromEntries(D.f.c), budgets: Object.fromEntries(D.f.b)},
+  };
+  P = {ops: [], tx: [], dx: [], pl: [], pd: [], la: [], ld: [], b: []};
+}
+const pendingCount = () => Object.values(P).reduce((n, a) => n + a.length, 0);
+const today = () => D.t.slice(0, 10);
+const nowMin = () => toMin(D.t.slice(11, 16));
+const placeById = id => M.places.find(p => p.id === id);
+const placeName = id => (placeById(id) || {}).name || "";
+
+// ---------------------------------------------------------------- schedule logic (mirrors the bot)
+function occurrences(day) {
+  const w = wdOf(day);
+  return M.events.filter(e => !M.skips.has(e.id + "|" + day) && (e.date === day || (!e.date && e.wd.includes(w))))
+                 .sort((a, b) => a.start.localeCompare(b.start));
+}
+function departures(ln) {
+  const first = toMin(ln.first) ?? 360; let last = toMin(ln.last) ?? 1380;
+  if (last <= first) last += 1440;
+  const out = []; const step = Math.max(1, ln.headway);
+  for (let t = first; t <= last && out.length < 500; t += step) out.push(t);
+  return out;
+}
+function planTrip(ev, day) {
+  const place = placeById(ev.place);
+  if (!place || place.home) return null;
+  const st = toMin(ev.start); if (st == null) return null;
+  const earlier = occurrences(day).filter(e => e.id !== ev.id && e.start < ev.start);
+  const prev = earlier.length ? earlier[earlier.length - 1].place : 0;
+  if (prev && prev === ev.place) return null; // already there after the previous event
+  const h = home(), homeId = h ? h.id : 0;
+  const origin = (prev && placeById(prev)) || h || null;
+  const originId = origin ? origin.id : 0;
+  const must = st - 5; let best = null;
+  for (const ln of M.lines.filter(l => l.place === place.id && (l.from || homeId) === originId)) {
+    const latest = must - ln.ride - ln.wf;
+    const deps = departures(ln).filter(d => d <= latest);
+    if (!deps.length) continue;
+    const dep = deps[deps.length - 1], leave = dep - ln.wt;
+    if (!best || leave > best.leave) best = {leave, line: ln.name, stop: ln.stop, exit: ln.exit, dep, arrive: dep + ln.ride + ln.wf};
+  }
+  if (!best) best = {leave: must - place.travel, line: null, arrive: must, minutes: place.travel};
+  best.origin = origin; best.fromHome = !origin || origin.id === homeId;
+  return best;
+}
+function tripText(p) {
+  const frm = p.fromHome || !p.origin ? "" : T(`from ${esc(p.origin.name)}, `, `из «${esc(p.origin.name)}», `);
+  if (!p.line) return frm + T(`about ${p.minutes} min on the way`, `около ${p.minutes} мин в пути`);
+  return frm + T(`bus at ${fromMin(p.dep)}${p.stop ? " from " + esc(p.stop) : ""}${p.exit ? ", get off at " + esc(p.exit) : ""}, arrive ~${fromMin(p.arrive)}`,
+                 `автобус в ${fromMin(p.dep)}${p.stop ? " с ост. " + esc(p.stop) : ""}${p.exit ? ", выход " + esc(p.exit) : ""}, прибытие ~${fromMin(p.arrive)}`);
+}
+function planText(p) {
+  if (!p) return "";
+  const frm = p.fromHome || !p.origin ? "" : T(`from «${esc(p.origin.name)}»: `, `из «${esc(p.origin.name)}»: `);
+  if (p.line) return "🚶 " + frm + T(`leave ${fromMin(p.leave)} → ${esc(p.line)} at ${fromMin(p.dep)}${p.stop ? " (" + esc(p.stop) + ")" : ""}${p.exit ? ", get off at " + esc(p.exit) : ""} → ~${fromMin(p.arrive)}`,
+                                     `выйти в ${fromMin(p.leave)} → ${esc(p.line)} в ${fromMin(p.dep)}${p.stop ? " (" + esc(p.stop) + ")" : ""}${p.exit ? ", выход " + esc(p.exit) : ""} → ~${fromMin(p.arrive)}`);
+  return "🚶 " + frm + T(`leave ~${fromMin(p.leave)} (~${p.minutes} min)`, `выйти ~${fromMin(p.leave)} (~${p.minutes} мин)`);
+}
+
+// pending schedule ops (also update the local preview)
+function queueOp(op, isNewEvent) {
+  P.ops.push(op);
+  if (isNewEvent) op._tmp = isNewEvent;
+  refresh();
+}
+function opPlace(id) { return id ? placeName(id) : ""; }
+
+// ---------------------------------------------------------------- UI shell
+let tab = "sched", weekStart = null;
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  render();
+}
+function toast(msg) { const el = $("toast"); el.textContent = msg; el.style.display = "block"; clearTimeout(toast._t); toast._t = setTimeout(() => el.style.display = "none", 2600); }
+function openSheet(html, onMount) {
+  $("sheet").innerHTML = html; $("sheet").style.display = "block"; $("sheetbg").style.display = "block";
+  if (tg && tg.BackButton) { tg.BackButton.show(); }
+  if (onMount) onMount($("sheet"));
+}
+function closeSheet() {
+  $("sheet").style.display = "none"; $("sheetbg").style.display = "none"; $("sheet").innerHTML = "";
+  if (tg && tg.BackButton) tg.BackButton.hide();
+}
+function refresh() {
+  const n = pendingCount();
+  const label = T(`Save to bot (${n})`, `Сохранить в бот (${n})`);
+  if (IN_TG && tg.MainButton) {
+    $("savebar").style.display = n ? "block" : "none";
+    $("savebtn").style.display = "none";
+    if (n) { tg.MainButton.setText(label); tg.MainButton.show(); } else tg.MainButton.hide();
+  } else {
+    $("savebar").style.display = n ? "block" : "none";
+    $("savebtn").style.display = "";
+    $("savebtn").textContent = label;
+  }
+  render();
+}
+
+// ---------------------------------------------------------------- schedule tab
+let selDay = null;
+const PLACE_COLORS = ["--red", "--blue", "--green", "--violet", "--amber", "--teal"];
+function placeColor(id) {
+  if (!id) return "var(--muted)";
+  const idx = M.places.filter(p => !p.home).findIndex(p => p.id === id);
+  return `var(${PLACE_COLORS[(idx < 0 ? Math.abs(id) : idx) % PLACE_COLORS.length]})`;
+}
+const MONTHS = () => LANG === "ru" ? ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
+  : ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function renderSched() {
+  const t = today();
+  if (!weekStart) weekStart = addDays(t, -wdOf(t));
+  if (!selDay || selDay < weekStart || selDay > addDays(weekStart, 6)) selDay = (t >= weekStart && t <= addDays(weekStart, 6)) ? t : weekStart;
+  const d = toDate(selDay), evs = occurrences(selDay);
+  const rel = selDay === t ? T("Today", "Сегодня") : selDay === addDays(t, 1) ? T("Tomorrow", "Завтра") : WDL()[wdOf(selDay)];
+  let h = `<div class="dayhead"><div><h1>${rel}</h1><div class="sub">${LANG === "ru" ? `${d.getDate()} ${MONTHS()[d.getMonth()]}` : `${MONTHS()[d.getMonth()]} ${d.getDate()}`}${rel !== WDL()[wdOf(selDay)] ? ", " + WDL()[wdOf(selDay)].toLowerCase() : ""}</div></div>
+    <div class="nav"><button class="round" id="wprev" aria-label="${T("Previous week", "Прошлая неделя")}">‹</button>
+    <button class="round" id="wnext" aria-label="${T("Next week", "Следующая неделя")}">›</button>
+    <button class="round add" id="addev" aria-label="${T("Add event", "Добавить событие")}">+</button></div></div><div class="week">`;
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(weekStart, i), n = occurrences(day).length;
+    h += `<button class="wd ${day === selDay ? "sel" : ""} ${day === t ? "today" : ""}" data-sel="${day}"><span>${WD()[i]}</span><b>${toDate(day).getDate()}</b>
+      <i>${"<u></u>".repeat(Math.min(n, 4))}</i></button>`;
+  }
+  h += `</div>`;
+  if (!evs.length) {
+    h += `<div class="free"><h2>${T("Free day", "Свободный день")}</h2><div class="hint">${T("Nothing planned. Tap + to add a lesson or a meeting.", "Ничего не запланировано. Нажмите +, чтобы добавить пару или встречу.")}</div></div>`;
+  } else {
+    h += `<div class="line">`;
+    for (const e of evs) {
+      const pl = placeById(e.place), plan = planTrip(e, selDay), c = placeColor(e.place);
+      if (plan) h += `<div class="trip" style="--c:${c}"><div class="tm">${fromMin(plan.leave)}<small style="display:block;font-weight:500;font-size:11.5px">${T("leave", "выйти")}</small></div><div class="rail"></div>
+        <div class="what">${plan.line ? `<span class="plate">${esc(routeRef(plan.line) || plan.line)}</span> ` : "🚶 "}${tripText(plan)}</div></div>`;
+      h += `<div class="stop ev ${e.id < 0 ? "pending" : ""}" style="--c:${c}" data-ev="${e.id}" data-day="${selDay}" tabindex="0">
+        <div class="tm">${esc(e.start)}${e.end ? `<small>${esc(e.end)}</small>` : ""}</div><div class="rail"></div>
+        <div class="body"><b>${esc(e.title)}</b>${e.date ? "" : ` <span class="hint" title="${T("weekly", "каждую неделю")}">↻</span>`}
+        ${pl ? `<div class="pl">${pl.home ? "🏠" : "📍"} ${esc(pl.name)}</div>` : ""}</div></div>`;
+    }
+    h += `</div>`;
+  }
+  h += `<div class="foot">${T("Data as of", "Данные на")} ${esc(D.t.replace("T", " "))}. ${T("Send /app to refresh.", "Чтобы обновить, отправьте /app.")}</div>`;
+  $("main").innerHTML = h;
+  $("wprev").onclick = () => { weekStart = addDays(weekStart, -7); selDay = weekStart; render(); };
+  $("wnext").onclick = () => { weekStart = addDays(weekStart, 7); selDay = weekStart; render(); };
+  $("addev").onclick = () => eventSheet(null, selDay);
+  document.querySelectorAll("[data-sel]").forEach(b => b.onclick = () => { selDay = b.dataset.sel; render(); });
+  document.querySelectorAll(".ev").forEach(el => {
+    const open = () => eventSheet(M.events.find(e => e.id === +el.dataset.ev), el.dataset.day);
+    el.onclick = open; el.onkeydown = ev => { if (ev.key === "Enter") open(); };
+  });
+}
+
+function eventSheet(ev, day) {
+  if (ev && ev.locked) { toast(T("Save first, then edit this one", "Сначала сохраните, потом редактируйте")); return; }
+  const isNew = !ev;
+  const e = ev || {title: "", start: "09:00", end: "10:00", date: day, wd: [], place: 0};
+  let recurring = isNew ? false : !e.date;
+  let days = new Set(e.wd.length ? e.wd : [wdOf(day)]);
+  const placeOpts = `<option value="0">— ${T("no place", "без места")} —</option>` +
+    M.places.filter(p => !p.home).map(p => `<option value="${p.id}" ${p.id === e.place ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+  const html = `<h2>${isNew ? T("New event", "Новое событие") : esc(e.title)}</h2>
+    ${!isNew && !e.date ? `<div class="hint">${T("Repeats weekly · selected day", "Повторяется · выбранный день")} ${ddmm(day)}</div>` : ""}
+    <label>${T("Title", "Название")}</label><input id="f-title" value="${esc(e.title)}" maxlength="200">
+    <div class="grid2"><div><label>${T("Start", "Начало")}</label><input type="time" id="f-start" value="${esc(e.start)}"></div>
+    <div><label>${T("End", "Конец")}</label><input type="time" id="f-end" value="${esc(e.end)}"></div></div>
+    <label>${T("When", "Когда")}</label>
+    <div class="seg" id="f-mode"><button data-m="once">${T("Once", "Один раз")}</button><button data-m="rep">${T("Weekly", "Каждую неделю")}</button></div>
+    <div id="f-dates" style="margin-top:8px"></div>
+    <label>${T("Place", "Место")}</label><select id="f-place">${placeOpts}</select>
+    <div class="stack" style="margin-top:16px" id="f-actions"></div>`;
+  openSheet(html, sh => {
+    const drawWhen = () => {
+      sh.querySelectorAll("#f-mode button").forEach(b => b.classList.toggle("on", (b.dataset.m === "rep") === recurring));
+      $("f-dates").innerHTML = recurring
+        ? `<div class="chips">${WD().map((n, i) => `<button class="chip ${days.has(i) ? "on" : ""}" data-d="${i}">${n}</button>`).join("")}</div>`
+        : `<input type="date" id="f-date" value="${esc(e.date || day)}">`;
+      $("f-dates").querySelectorAll(".chip").forEach(c => c.onclick = () => {
+        const d = +c.dataset.d; days.has(d) ? days.delete(d) : days.add(d); drawWhen(); });
+    };
+    sh.querySelectorAll("#f-mode button").forEach(b => b.onclick = () => { recurring = b.dataset.m === "rep"; drawWhen(); });
+    drawWhen();
+    const read = () => {
+      const title = $("f-title").value.trim(), start = $("f-start").value, end = $("f-end").value;
+      if (!title || !start) { toast(T("Title and start time are required", "Нужны название и время начала")); return null; }
+      if (end && end <= start) { toast(T("End must be after start", "Конец должен быть позже начала")); return null; }
+      if (recurring && !days.size) { toast(T("Pick at least one day", "Выберите хотя бы один день")); return null; }
+      const date = recurring ? "" : (($("f-date") || {}).value || day);
+      return {title, start, end, date, wd: recurring ? [...days].sort() : [], place: +$("f-place").value};
+    };
+    const A = $("f-actions");
+    const btn = (cls, text, fn) => { const b = document.createElement("button"); b.className = "btn full " + cls; b.textContent = text; b.onclick = fn; A.appendChild(b); };
+    if (isNew) {
+      btn("", T("Add", "Добавить"), () => {
+        const v = read(); if (!v) return;
+        const id = tmpId--;
+        M.events.push({id, ...v, remind: 15});
+        queueOp({action: "add", title: v.title, start: v.start, end: v.end, date: v.date || undefined,
+                 weekdays: v.wd.length ? v.wd : undefined, place: opPlace(v.place)}, id);
+        closeSheet(); toast(T("Added (not saved yet)", "Добавлено (ещё не сохранено)"));
+      });
+      return;
+    }
+    if (e.id < 0) { // an unsaved new event: edit or drop the queued "add"
+      const op = P.ops.find(o => o._tmp === e.id);
+      btn("", T("Update", "Обновить"), () => {
+        const v = read(); if (!v || !op) return;
+        Object.assign(e, v);
+        Object.assign(op, {title: v.title, start: v.start, end: v.end, date: v.date || undefined,
+                           weekdays: v.wd.length ? v.wd : undefined, place: opPlace(v.place)});
+        closeSheet(); refresh();
+      });
+      btn("red", T("Remove", "Убрать"), () => {
+        M.events = M.events.filter(x => x.id !== e.id);
+        P.ops = P.ops.filter(o => o !== op && o._tmp !== e.id);
+        closeSheet(); refresh();
+      });
+      return;
+    }
+    btn("", recurring || !e.date ? T("Save for all weeks", "Сохранить для всех недель") : T("Save", "Сохранить"), () => {
+      const v = read(); if (!v) return;
+      Object.assign(e, {title: v.title, start: v.start, end: v.end, place: v.place, date: v.date, wd: v.wd});
+      queueOp({action: "update", event_id: e.id, title: v.title, start: v.start, end: v.end, place: opPlace(v.place),
+               ...(v.wd.length ? {weekdays: v.wd} : {date: v.date})});
+      closeSheet();
+    });
+    if (!e.date) {
+      btn("sec", T(`Change only ${ddmm(day)}`, `Изменить только ${ddmm(day)}`), () => {
+        const v = read(); if (!v) return;
+        M.skips.add(e.id + "|" + day);
+        M.events.push({id: tmpId--, title: v.title, start: v.start, end: v.end, date: day, wd: [], place: v.place, remind: e.remind, locked: true});
+        queueOp({action: "change_once", event_id: e.id, date: day, title: v.title, start: v.start, end: v.end, place: opPlace(v.place)});
+        closeSheet();
+      });
+      btn("sec", T(`Skip ${ddmm(day)}`, `Пропустить ${ddmm(day)}`), () => {
+        M.skips.add(e.id + "|" + day);
+        queueOp({action: "skip_once", event_id: e.id, date: day});
+        closeSheet();
+      });
+    }
+    btn("red", T("Delete completely", "Удалить полностью"), () => {
+      M.events = M.events.filter(x => x.id !== e.id);
+      queueOp({action: "delete", event_id: e.id});
+      closeSheet();
+    });
+  });
+}
+
+// ---------------------------------------------------------------- finance tab
+const CAT_COLORS = ["--red", "--blue", "--green", "--violet", "--amber", "--teal"];
+function renderFin() {
+  const cats = {...M.fin.cats};
+  let inc = M.fin.inc;
+  for (const t of P.tx) { if (t.d === "out") cats[t.c || "other"] = (cats[t.c || "other"] || 0) + t.a; else inc += t.a; }
+  for (const t of M.tx) if (P.dx.includes(t.id) && t.cur === "UZS" && t.ts.slice(0, 7) === D.t.slice(0, 7)) {
+    if (t.dir === "out") cats[t.cat] = Math.max(0, (cats[t.cat] || 0) - t.amount); else inc -= t.amount;
+  }
+  const out = Object.values(cats).reduce((a, b) => a + b, 0);
+  const sorted = Object.entries(cats).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  const col = i => `var(${CAT_COLORS[i % CAT_COLORS.length]})`;
+  let h = `<div class="money-hero"><div class="lbl">${T("Balance this month", "Баланс за месяц")}</div>
+    <div class="big num">${money(inc - out)}<small>сум</small></div>
+    <div class="strip">${out ? sorted.map(([c, v], i) => `<i style="width:${v / out * 100}%;background:${col(i)}" title="${esc(D.c[c] || c)}"></i>`).join("") : ""}</div>
+    <div class="inout"><div><span class="lbl">${T("Income", "Доход")}</span><b class="num">+${money(inc)}</b></div>
+    <div><span class="lbl">${T("Spent", "Расход")}</span><b class="num">−${money(out)}</b></div></div></div>
+    <div class="grid2" style="margin-bottom:12px">
+      <button class="btn" id="addout" style="background:var(--red)">− ${T("Expense", "Расход")}</button>
+      <button class="btn" id="addin" style="background:var(--green)">+ ${T("Income", "Доход")}</button></div>`;
+  h += `<div class="card legend"><h3>${T("Where it went", "Куда ушло")}</h3>`;
+  if (!sorted.length) h += `<div class="hint">${T("No spending this month yet.", "В этом месяце расходов пока нет.")}</div>`;
+  sorted.forEach(([c, v], i) => h += `<div class="row"><span class="dot" style="background:${col(i)}"></span><span style="flex:1">${esc(D.c[c] || c)}</span>
+    <span class="hint num">${Math.round(v / out * 100)}%</span><span class="num" style="min-width:92px;text-align:right">${money(v)}</span></div>`);
+  h += `</div><div class="card"><div class="row between"><h3>${T("Budgets", "Бюджеты")}</h3>
+    <button class="link" id="addbud">${T("Set", "Задать")}</button></div>`;
+  const buds = Object.entries(M.fin.budgets);
+  if (!buds.length) h += `<div class="hint">${T("Set a monthly limit and the bot will warn you at 80% and 100%.", "Задайте лимит на месяц — бот предупредит на 80% и 100%.")}</div>`;
+  for (const [c, lim] of buds) {
+    const spent = c === "total" ? out : (cats[c] || 0), pct = lim ? spent / lim : 0;
+    h += `<div style="margin:10px 0"><div class="row between small"><span>${esc(c === "total" ? T("All spending", "Все расходы") : (D.c[c] || c))}</span>
+      <span class="num">${money(spent)} / ${money(lim)}</span></div>
+      <div class="rail2"><i class="${pct >= 1 ? "over" : pct >= .8 ? "warn" : ""}" style="width:${Math.min(100, Math.max(2, pct * 100))}%"></i></div></div>`;
+  }
+  h += `</div><div class="card"><h3>${T("Recent", "Последние")}</h3>`;
+  for (const t of P.tx) h += `<div class="tx"><span class="hint small">${T("new", "новое")}</span><span class="m">${esc(t.m || D.c[t.c] || "")}</span>
+    <span class="num ${t.d === "in" ? "in" : ""}">${t.d === "in" ? "+" : "−"}${money(t.a)}</span></div>`;
+  if (!M.tx.length && !P.tx.length) h += `<div class="hint">${T("No transactions yet", "Операций пока нет")}</div>`;
+  for (const t of M.tx) {
+    const del = P.dx.includes(t.id);
+    h += `<div class="tx ${del ? "del" : ""}"><span class="hint small num">${ddmm(t.ts.slice(0, 10))}</span>
+      <span class="m">${esc(t.merchant || D.c[t.cat] || t.cat)}</span>
+      <span class="num ${t.dir === "in" ? "in" : ""}">${t.dir === "in" ? "+" : "−"}${money(t.amount)}${t.cur !== "UZS" ? " " + esc(t.cur) : ""}</span>
+      <button class="link" data-dx="${t.id}">${del ? "↩︎" : "🗑"}</button></div>`;
+  }
+  h += `</div>`;
+  $("main").innerHTML = h;
+  $("addout").onclick = () => txSheet("out");
+  $("addin").onclick = () => txSheet("in");
+  $("addbud").onclick = budgetSheet;
+  document.querySelectorAll("[data-dx]").forEach(b => b.onclick = () => {
+    const id = +b.dataset.dx; P.dx = P.dx.includes(id) ? P.dx.filter(x => x !== id) : [...P.dx, id]; refresh(); });
+}
+function catOptions(sel, withTotal) {
+  return (withTotal ? `<option value="total">${T("All spending", "Все расходы")}</option>` : "") +
+    Object.entries(D.c).map(([k, v]) => `<option value="${k}" ${k === sel ? "selected" : ""}>${esc(v)}</option>`).join("");
+}
+function txSheet(dir) {
+  openSheet(`<h2>${dir === "out" ? T("New expense", "Новый расход") : T("New income", "Новый доход")}</h2>
+    <label>${T("Amount, UZS (e.g. 25000 or 25k)", "Сумма, сум (например 25000 или 25к)")}</label>
+    <input id="t-a" inputmode="decimal" placeholder="25 000">
+    <label>${T("Category", "Категория")}</label><select id="t-c">${catOptions(dir === "out" ? "food" : "salary")}</select>
+    <div class="grid2"><div><label>${T("Card", "Карта")}</label><select id="t-k"><option value="">—</option>
+      <option>Uzcard</option><option>Humo</option><option>Visa</option><option>Mastercard</option><option value="Cash">${T("Cash", "Наличные")}</option></select></div>
+      <div><label>${T("Date", "Дата")}</label><input type="date" id="t-dt" value="${today()}"></div></div>
+    <label>${T("Where / note", "Где / заметка")}</label><input id="t-m" maxlength="120">
+    <button class="btn full" id="t-ok" style="margin-top:16px">${T("Add", "Добавить")}</button>`, () => {
+    $("t-a").focus();
+    $("t-ok").onclick = () => {
+      const a = parseAmount($("t-a").value);
+      if (!a || a <= 0) { toast(T("Enter an amount", "Введите сумму")); return; }
+      P.tx.push({d: dir, a, c: $("t-c").value, k: $("t-k").value || undefined, m: $("t-m").value.trim() || undefined, dt: $("t-dt").value});
+      closeSheet(); refresh(); toast(T("Added (not saved yet)", "Добавлено (ещё не сохранено)"));
+    };
+  });
+}
+function budgetSheet() {
+  openSheet(`<h2>${T("Monthly budget", "Месячный бюджет")}</h2>
+    <label>${T("Category", "Категория")}</label><select id="b-c">${catOptions("total", true)}</select>
+    <label>${T("Limit, UZS (0 = remove)", "Лимит, сум (0 = удалить)")}</label><input id="b-l" inputmode="decimal" placeholder="2m">
+    <button class="btn full" id="b-ok" style="margin-top:16px">OK</button>`, () => {
+    $("b-ok").onclick = () => {
+      const lim = parseAmount($("b-l").value); const c = $("b-c").value;
+      if (lim == null) { toast(T("Enter a limit", "Введите лимит")); return; }
+      P.b = P.b.filter(x => x[0] !== c); P.b.push([c, Math.round(lim)]);
+      if (lim > 0) M.fin.budgets[c] = Math.round(lim); else delete M.fin.budgets[c];
+      closeSheet(); refresh();
+    };
+  });
+}
+
+// ---------------------------------------------------------------- transit tab
+let map = null, addMode = false;
+const home = () => M.places.find(p => p.home);
+function yandexRoute(a, b) { return `https://yandex.uz/maps/?rtext=${a && a.lat != null ? a.lat + "," + a.lon : ""}~${b.lat},${b.lon}&rtt=mt`; }
+function openLink(u) { if (tg && tg.openLink && IN_TG) tg.openLink(u); else window.open(u, "_blank"); }
+function renderTrans() {
+  let h = `<div class="mapwrap"><div id="map"></div>
+      <div class="mapbar"><input id="rt-q" placeholder="${T("Bus number, e.g. 17", "Номер автобуса, например 17")}" style="flex:1">
+      <button class="btn" id="rt-go">${T("Show", "Показать")}</button></div>
+      <div class="mapchips chips" id="rt-chips"></div></div>
+    <div class="tools">
+      <button class="btn ${addMode ? "red" : ""}" id="addplace">${addMode ? T("Tap the map…", "Нажмите на карту…") : "📍 " + T("Add place", "Добавить место")}</button>
+      <button class="btn sec" id="live">🟢 ${T("Live buses", "Автобусы live")}</button>
+      <button class="btn sec" id="stops">🚏 ${T("Stops near home", "Остановки у дома")}</button>
+      <button class="btn sec ${OV.metro ? "on" : ""}" id="metro">Ⓜ️ ${OV.metro ? T("Hide metro", "Скрыть метро") : T("Metro lines", "Линии метро")}</button></div>`;
+  const trips = occurrences(today()).map(e => [e, planTrip(e, today())]).filter(x => x[1]);
+  h += `<div class="card"><h3>${T("Today's trips", "Поездки сегодня")}</h3>`;
+  if (!trips.length) h += `<div class="hint">${T("No trips today. Attach a place to an event to see when to leave.", "Сегодня поездок нет. Укажите место у события — и здесь появится, когда выходить.")}</div>`;
+  h += `<div class="line">`;
+  for (const [e, p] of trips) {
+    const soon = p.leave - nowMin(), c = placeColor(e.place);
+    h += `<div class="stop" style="--c:${c};cursor:default"><div class="tm">${fromMin(p.leave)}${soon >= 0 && soon <= 90 ? `<small>${T("in", "через")} ${soon} ${T("min", "мин")}</small>` : ""}</div>
+      <div class="rail"></div><div class="body"><b>${esc(e.title)}</b><div class="pl">${p.line ? `<span class="plate">${esc(routeRef(p.line) || p.line)}</span> ` : "🚶 "}${tripText(p)}</div></div></div>`;
+  }
+  h += `</div></div><div class="card"><h3>${T("Places", "Места")}</h3>`;
+  if (!M.places.length) h += `<div class="hint">${T("Tap “Add place”, then tap the spot on the map.", "Нажмите «Добавить место», затем точку на карте.")}</div>`;
+  for (const p of M.places) {
+    const del = P.pd.includes(p.id) && p.id > 0;
+    h += `<div class="ticket ${del ? "tx del" : ""}"><span class="dot" style="background:${p.home ? "var(--ink)" : placeColor(p.id)};border-radius:50%;width:14px;height:14px"></span>
+      <span class="m"><b>${p.home ? "🏠 " : ""}${esc(p.name)}</b>${p.home ? "" : ` <span class="hint">~${p.travel} ${T("min from home", "мин от дома")}</span>`}</span>
+      ${!p.home && p.lat != null ? `<button class="link" data-route="${p.id}">${T("Route", "Маршрут")}</button>` : ""}
+      <button class="link" data-pd="${p.id}" aria-label="${T("Delete", "Удалить")}">${del ? "↩︎" : "🗑"}</button></div>`;
+  }
+  h += `</div><div class="card"><div class="row between"><h3>${T("My buses and metro", "Мои автобусы и метро")}</h3>
+    <button class="link" id="addline">+ ${T("Add", "Добавить")}</button></div>`;
+  if (!M.lines.length) h += `<div class="hint">${T("Add the bus you take, with its stops and interval, to get leave times.", "Добавьте свой автобус — остановки и интервал, и бот подскажет, когда выходить.")}</div>`;
+  for (const ln of M.lines) {
+    const del = P.ld.includes(ln.id);
+    const frm = ln.from ? placeName(ln.from) : T("home", "дом");
+    h += `<div class="ticket ${del ? "tx del" : ""}"><span class="plate" style="font-size:15px;padding:4px 9px">${esc(routeRef(ln.name) || ln.name.slice(0, 4))}</span>
+      <span class="m"><b>${esc(frm)} → ${esc(placeName(ln.place))}</b>
+      <div class="hint small">🚏 ${esc(ln.stop || "?")} → ${esc(ln.exit || "?")}</div>
+      <div class="hint small">${esc(ln.first)}–${esc(ln.last)}, ${T("every", "каждые")} ${ln.headway} ${T("min", "мин")}, ${T("ride", "в пути")} ${ln.ride} ${T("min", "мин")}</div></span>
+      ${ln.id > 0 ? `<button class="link" data-ld="${ln.id}" aria-label="${T("Delete", "Удалить")}">${del ? "↩︎" : "🗑"}</button>` : ""}</div>`;
+  }
+  h += `</div><div class="foot">${T("Times are estimates from your timetable. “Live buses” opens Yandex Maps with real positions.",
+        "Время — оценка по вашему расписанию. «Автобусы live» открывает Яндекс Карты с реальными позициями.")}</div>`;
+  $("main").innerHTML = h;
+  drawMap();
+  $("addplace").onclick = () => { addMode = !addMode; renderTrans(); if (addMode) toast(T("Tap the place on the map", "Нажмите на нужное место на карте")); };
+  $("live").onclick = () => { const p = home() || {}; openLink(`https://yandex.uz/maps/?ll=${p.lon ?? 69.2401},${p.lat ?? 41.2995}&z=14&l=mt`); };
+  $("addline").onclick = lineSheet;
+  const go = () => { const r = routeRef($("rt-q").value); if (!r) { toast(T("Enter a route number", "Введите номер маршрута")); return; } showRoute(r); };
+  $("rt-go").onclick = go;
+  $("rt-q").onkeydown = e => { if (e.key === "Enter") go(); };
+  $("stops").onclick = showStops;
+  $("metro").onclick = () => { OV.metro = !OV.metro; if (OV.metro) loadMetro(); else renderTrans(); };
+  drawChips();
+  document.querySelectorAll("[data-route]").forEach(b => b.onclick = () => openLink(yandexRoute(home(), placeById(+b.dataset.route))));
+  document.querySelectorAll("[data-pd]").forEach(b => b.onclick = () => {
+    const id = +b.dataset.pd;
+    if (id < 0) { M.places = M.places.filter(p => p.id !== id); P.pl = P.pl.filter(x => x._tmp !== id); }
+    else P.pd = P.pd.includes(id) ? P.pd.filter(x => x !== id) : [...P.pd, id];
+    refresh();
+  });
+  document.querySelectorAll("[data-ld]").forEach(b => b.onclick = () => {
+    const id = +b.dataset.ld; P.ld = P.ld.includes(id) ? P.ld.filter(x => x !== id) : [...P.ld, id]; refresh(); });
+}
+// ---------------------------------------------------------------- city map, routes & stops (OpenStreetMap data)
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+const BBOX = "41.15,69.05,41.48,69.50"; // Tashkent (south,west,north,east)
+const COLORS = ["#2a7fd4", "#e5484d", "#2f9e60", "#d99a00", "#8e4ec6", "#12a594", "#c2298a", "#5b6b7f"];
+const OV = {routes: [], metro: false, stops: null, view: null, cache: {}};
+const routeRef = s => { const m = /\d+[a-zа-яё]?/i.exec(String(s || "")); return m ? m[0].toUpperCase() : null; };
+function cacheGet(k) { if (OV.cache[k]) return OV.cache[k]; try { const v = localStorage.getItem("ov:" + k); if (v) { const o = JSON.parse(v); if (Date.now() - o.t < 7 * 864e5) return (OV.cache[k] = o.d); } } catch (e) {} return null; }
+function cachePut(k, d) { OV.cache[k] = d; try { localStorage.setItem("ov:" + k, JSON.stringify({t: Date.now(), d})); } catch (e) {} }
+async function overpass(query) {
+  let lastErr;
+  for (const url of OVERPASS) {
+    try {
+      const r = await fetch(url, {method: "POST", body: "data=" + encodeURIComponent(query),
+                                  headers: {"Content-Type": "application/x-www-form-urlencoded"}});
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.json();
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("overpass failed");
+}
+// compact result: {lines: [[[lat,lon],...],...], stops: [[lat,lon,name],...], names: [...], colour}
+function compact(json) {
+  const names = {}, out = {lines: [], stops: [], names: [], colour: null};
+  for (const el of json.elements || []) if (el.type === "node" && el.tags) names[el.id] = el.tags.name || el.tags["name:uz"] || el.tags["name:ru"] || "";
+  const seen = new Set();
+  for (const el of json.elements || []) {
+    if (el.type !== "relation") continue;
+    if (el.tags) { if (el.tags.name) out.names.push(el.tags.name); out.colour = out.colour || el.tags.colour || null; }
+    for (const m of el.members || []) {
+      if (m.type === "way" && m.geometry && !/platform/.test(m.role || "")) out.lines.push(m.geometry.map(g => [+g.lat.toFixed(5), +g.lon.toFixed(5)]));
+      if (m.type === "node" && /stop|platform/.test(m.role || "") && m.lat != null) {
+        const nm = names[m.ref] || ""; const key = nm || m.ref;
+        if (!seen.has(key)) { seen.add(key); out.stops.push([+m.lat.toFixed(5), +m.lon.toFixed(5), nm]); }
+      }
+    }
+  }
+  return out;
+}
+async function fetchRoute(ref) {
+  const hit = cacheGet("r:" + ref); if (hit) return hit;
+  const q = `[out:json][timeout:25];relation["type"="route"]["route"~"^(bus|trolleybus|minibus|share_taxi)$"]["ref"="${ref}"](${BBOX})->.r;.r out geom;node(r.r);out tags;`;
+  const d = compact(await overpass(q)); cachePut("r:" + ref, d); return d;
+}
+async function showRoute(ref) {
+  if (OV.routes.some(r => r.ref === ref)) { toast(T("Already shown", "Уже показан")); return; }
+  toast(T(`Loading route ${ref}…`, `Загружаю маршрут ${ref}…`));
+  try {
+    const d = await fetchRoute(ref);
+    if (!d.lines.length) { toast(T(`Route ${ref} not found in OpenStreetMap`, `Маршрут ${ref} не найден в OpenStreetMap`)); return; }
+    const used = OV.routes.map(r => r.color);
+    OV.routes.push({ref, color: COLORS.find(c => !used.includes(c)) || COLORS[OV.routes.length % COLORS.length], d, fit: true});
+    if (tab === "trans") renderTrans();
+  } catch (e) { toast(T("Couldn't load map data. Check the internet and try again.", "Не удалось загрузить данные карты. Проверьте интернет и повторите.")); }
+}
+async function loadMetro() {
+  try {
+    let d = cacheGet("metro");
+    if (!d) {
+      const j = await overpass(`[out:json][timeout:25];relation["route"="subway"](${BBOX});out geom;node(r);out tags;`);
+      d = {byLine: []};
+      for (const el of (j.elements || []).filter(e => e.type === "relation")) {
+        const one = compact({elements: [el, ...(j.elements || []).filter(e => e.type === "node")]});
+        d.byLine.push({...one, colour: (el.tags && el.tags.colour) || "#d33"});
+      }
+      cachePut("metro", d);
+    }
+    OV.metroData = d;
+    if (!d.byLine.length) toast(T("No metro data found", "Данные метро не найдены"));
+  } catch (e) { OV.metro = false; toast(T("Couldn't load metro lines", "Не удалось загрузить линии метро")); }
+  if (tab === "trans") renderTrans();
+}
+async function showStops() {
+  const h = home();
+  if (!h || h.lat == null) { toast(T("Add your home on the map first", "Сначала добавьте дом на карту")); return; }
+  toast(T("Looking for stops…", "Ищу остановки…"));
+  try {
+    const k = `s:${h.lat.toFixed(3)},${h.lon.toFixed(3)}`;
+    let d = cacheGet(k);
+    if (!d) {
+      const j = await overpass(`[out:json][timeout:25];node(around:700,${h.lat},${h.lon})["highway"="bus_stop"]->.s;.s out;rel(bn.s)["route"~"^(bus|trolleybus|minibus)$"];out body;`);
+      const refs = {};
+      for (const r of (j.elements || []).filter(e => e.type === "relation"))
+        for (const m of r.members || []) if (m.type === "node" && r.tags && r.tags.ref) (refs[m.ref] = refs[m.ref] || new Set()).add(r.tags.ref);
+      d = (j.elements || []).filter(e => e.type === "node").map(n => [n.lat, n.lon, (n.tags && n.tags.name) || "", [...(refs[n.id] || [])].sort((a, b) => parseInt(a) - parseInt(b))]);
+      cachePut(k, d);
+    }
+    OV.stops = d; OV.view = [[h.lat, h.lon], 16];
+    if (!d.length) toast(T("No stops found nearby in OpenStreetMap", "Рядом не найдено остановок в OpenStreetMap"));
+    renderTrans();
+  } catch (e) { toast(T("Couldn't load stops", "Не удалось загрузить остановки")); }
+}
+function drawChips() {
+  const el = $("rt-chips"); if (!el) return;
+  const mine = [...new Set(M.lines.map(l => routeRef(l.name)).filter(Boolean))];
+  let h = mine.filter(r => !OV.routes.some(x => x.ref === r)).map(r => `<button class="chip" data-show="${esc(r)}">🚌 ${esc(r)}</button>`).join("");
+  h += OV.routes.map(r => `<button class="chip on" data-hide="${esc(r.ref)}" style="background:${r.color}">${esc(r.ref)} ✕</button>`).join("");
+  if (OV.stops) h += `<button class="chip on" data-hidestops="1">🚏 ✕</button>`;
+  el.innerHTML = h;
+  el.querySelectorAll("[data-show]").forEach(b => b.onclick = () => showRoute(b.dataset.show));
+  el.querySelectorAll("[data-hide]").forEach(b => b.onclick = () => { OV.routes = OV.routes.filter(r => r.ref !== b.dataset.hide); renderTrans(); });
+  el.querySelectorAll("[data-hidestops]").forEach(b => b.onclick = () => { OV.stops = null; renderTrans(); });
+}
+function drawMap() {
+  if (typeof window.L === "undefined") { $("map").innerHTML = `<div class="empty">${T("Map unavailable (no internet?)", "Карта недоступна (нет интернета?)")}</div>`; return; }
+  const Lf = window.L;
+  const h0 = home();
+  const center = OV.view ? OV.view[0] : (h0 && h0.lat != null ? [h0.lat, h0.lon] : [41.2995, 69.2401]);
+  map = Lf.map("map", {zoomControl: false}).setView(center, OV.view ? OV.view[1] : 12);
+  Lf.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19, attribution: "© OpenStreetMap"}).addTo(map);
+  if (OV.metro && OV.metroData) for (const ln of OV.metroData.byLine) {
+    for (const seg of ln.lines) Lf.polyline(seg, {color: ln.colour, weight: 5, opacity: .85}).addTo(map);
+    for (const st of ln.stops) Lf.circleMarker([st[0], st[1]], {radius: 5, color: ln.colour, fillColor: "#fff", fillOpacity: 1, weight: 2})
+      .addTo(map).bindPopup("Ⓜ️ " + esc(st[2]));
+  }
+  let bounds = null;
+  for (const r of OV.routes) {
+    for (const seg of r.d.lines) {
+      const pl = Lf.polyline(seg, {color: r.color, weight: 4, opacity: .85}).addTo(map);
+      if (r.fit) bounds = bounds ? bounds.extend(pl.getBounds()) : pl.getBounds();
+    }
+    const mine = M.lines.filter(l => routeRef(l.name) === r.ref);
+    const match = (a, b) => a && b && (a.toLowerCase().includes(b.toLowerCase()) || b.toLowerCase().includes(a.toLowerCase()));
+    for (const st of r.d.stops) {
+      const board = mine.some(l => match(st[2], l.stop)), out = mine.some(l => match(st[2], l.exit));
+      const mk = Lf.circleMarker([st[0], st[1]], {radius: board || out ? 8 : 4, color: r.color,
+        fillColor: board ? "#2f9e60" : out ? "#e5484d" : "#fff", fillOpacity: 1, weight: 2}).addTo(map);
+      mk.bindPopup(`🚏 ${esc(st[2] || T("Stop", "Остановка"))}<br><span style="color:${r.color}">● ${esc(r.ref)}</span>`);
+      if (board || out) mk.bindTooltip(board ? T("Get on", "Посадка") : T("Get off", "Выход"), {permanent: true, direction: "right"});
+    }
+    r.fit = false;
+  }
+  if (OV.stops) for (const st of OV.stops) {
+    const routes = st[3].length ? st[3].map(x => `<a href="#" data-pop-route="${esc(x)}">${esc(x)}</a>`).join(", ") : "—";
+    Lf.circleMarker([st[0], st[1]], {radius: 7, color: "#111", fillColor: "#ffd60a", fillOpacity: 1, weight: 2})
+      .addTo(map).bindPopup(`🚏 <b>${esc(st[2] || T("Stop", "Остановка"))}</b><br>${T("Routes", "Маршруты")}: ${routes}`);
+  }
+  for (const p of M.places.filter(p => p.lat != null))
+    Lf.marker([p.lat, p.lon]).addTo(map).bindTooltip((p.home ? "🏠 " : "📍 ") + esc(p.name), {permanent: true, direction: "top", offset: [-15, -12]});
+  if (bounds) map.fitBounds(bounds, {padding: [20, 20]});
+  map.on("moveend", () => { OV.view = [map.getCenter(), map.getZoom()]; });
+  map.on("popupopen", ev => {
+    const el = ev.popup.getElement && ev.popup.getElement();
+    if (el) el.querySelectorAll("[data-pop-route]").forEach(a => a.onclick = e => { e.preventDefault(); showRoute(a.dataset.popRoute); });
+  });
+  map.on("click", ev => { if (addMode) { addMode = false; placeSheet(ev.latlng.lat, ev.latlng.lng); } });
+}
+function placeSheet(lat, lon) {
+  openSheet(`<h2>${T("New place", "Новое место")}</h2><div class="hint">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+    <label>${T("Name", "Название")}</label><input id="p-n" maxlength="64" placeholder="${T("University", "Университет")}">
+    <label>${T("Trip from home, minutes (estimate)", "Дорога из дома, минут (примерно)")}</label><input id="p-t" inputmode="numeric" value="30">
+    <label class="row" style="color:var(--text);margin-top:12px"><input type="checkbox" id="p-h" style="width:auto"> ${T("This is my home", "Это мой дом")}</label>
+    <button class="btn full" id="p-ok" style="margin-top:16px">${T("Add", "Добавить")}</button>`, () => {
+    $("p-ok").onclick = () => {
+      const n = $("p-n").value.trim(); if (!n) { toast(T("Enter a name", "Введите название")); return; }
+      const t = Math.max(1, parseInt($("p-t").value, 10) || 30), h = $("p-h").checked, id = tmpId--;
+      if (h) M.places.forEach(p => p.home = false);
+      M.places.push({id, name: n, lat, lon, home: h, travel: t});
+      P.pl.push({n, lat: +lat.toFixed(6), lon: +lon.toFixed(6), t, h: h ? 1 : 0, _tmp: id});
+      closeSheet(); refresh();
+    };
+  });
+}
+function lineSheet() {
+  const dest = M.places.filter(p => !p.home);
+  if (!dest.length) { toast(T("Add a destination place first", "Сначала добавьте место назначения")); return; }
+  const hm = home();
+  const fromOpts = (hm ? "" : `<option value="0">🏠 ${T("Home", "Дом")}</option>`) +
+    [...M.places].sort((a, b) => b.home - a.home).map(p => `<option value="${p.id}">${p.home ? "🏠" : "📍"} ${esc(p.name)}</option>`).join("");
+  openSheet(`<h2>${T("New line", "Новый маршрут")}</h2>
+    <div class="grid2"><div><label>${T("From", "Откуда")}</label><select id="l-from">${fromOpts}</select></div>
+      <div><label>${T("To", "Куда")}</label><select id="l-p">${dest.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></div></div>
+    <label>${T("Name / number", "Название / номер")}</label><input id="l-n" placeholder="${T("Bus 17", "Автобус 17")}">
+    <div class="grid2"><div><label>${T("Boarding stop", "Остановка посадки")}</label><input id="l-s"></div>
+      <div><label>${T("Exit stop", "Остановка выхода")}</label><input id="l-x"></div></div>
+    <div class="grid3"><div><label>${T("First", "Первый")}</label><input type="time" id="l-f" value="06:00"></div>
+      <div><label>${T("Last", "Последний")}</label><input type="time" id="l-l" value="22:00"></div>
+      <div><label>${T("Every, min", "Интервал")}</label><input id="l-h" inputmode="numeric" value="10"></div></div>
+    <div class="grid3"><div><label>${T("Walk to stop", "Пешком до")}</label><input id="l-wt" inputmode="numeric" value="5"></div>
+      <div><label>${T("Ride", "В пути")}</label><input id="l-r" inputmode="numeric" value="25"></div>
+      <div><label>${T("Walk after", "Пешком после")}</label><input id="l-wf" inputmode="numeric" value="5"></div></div>
+    <button class="btn full" id="l-ok" style="margin-top:16px">${T("Add", "Добавить")}</button>`, () => {
+    $("l-ok").onclick = () => {
+      const pid = +$("l-p").value, n = $("l-n").value.trim();
+      const fsel = +$("l-from").value, fromPl = placeById(fsel), from = fromPl && !fromPl.home ? fsel : 0;
+      if (!n) { toast(T("Enter a name", "Введите название")); return; }
+      if (from && from === pid) { toast(T("From and To must differ", "«Откуда» и «Куда» должны отличаться")); return; }
+      const num = id => Math.max(0, parseInt($(id).value, 10) || 0);
+      const ln = {id: tmpId--, place: pid, from, name: n, stop: $("l-s").value.trim(), exit: $("l-x").value.trim(),
+                  first: $("l-f").value, last: $("l-l").value, headway: Math.max(1, num("l-h")), wt: num("l-wt"),
+                  ride: num("l-r"), wf: num("l-wf")};
+      M.lines.push(ln);
+      const item = {n, s: ln.stop, x: ln.exit, f: ln.first, l: ln.last, h: ln.headway, wt: ln.wt, r: ln.ride, wf: ln.wf};
+      if (pid > 0) item.p = pid; else item.pn = placeName(pid);
+      if (from > 0) item.fp = from; else if (from < 0) item.fpn = placeName(from);
+      P.la.push(item);
+      closeSheet(); refresh();
+    };
+  });
+}
+
+// ---------------------------------------------------------------- save
+function payload() {
+  const clean = o => { const c = {...o}; delete c._tmp; return c; };
+  return {v: 1, ops: P.ops.map(clean), tx: P.tx, dx: P.dx, pl: P.pl.map(clean), pd: P.pd, la: P.la, ld: P.ld, b: P.b};
+}
+function save() {
+  const s = JSON.stringify(payload());
+  if (new TextEncoder().encode(s).length > 4000) {
+    alert(T("Too many changes at once. Remove a few and save in two steps.", "Слишком много изменений сразу. Уберите часть и сохраните в два приёма."));
+    return;
+  }
+  if (IN_TG && tg.sendData) tg.sendData(s); // closes the Mini App; the bot replies in the chat
+  else { window.__lastPayload = s; console.log("PAYLOAD", s); toast("Payload ready (not in Telegram)"); }
+}
+
+function render() {
+  if (!D) return;
+  if (map) { try { map.remove(); } catch (e) {} map = null; }
+  if (tab === "sched") renderSched(); else if (tab === "fin") renderFin(); else renderTrans();
+}
+
+// ---------------------------------------------------------------- boot
+(async function boot() {
+  if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
+  const dark = tg && tg.colorScheme ? tg.colorScheme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  if (tg && tg.onEvent) tg.onEvent("themeChanged", () => { document.documentElement.dataset.theme = tg.colorScheme === "dark" ? "dark" : "light"; });
+  if (tg && tg.setHeaderColor) { try { tg.setHeaderColor(dark ? "#0E1530" : "#E9EDF4"); tg.setBackgroundColor(dark ? "#0E1530" : "#E9EDF4"); } catch (e) {} }
+  try { D = await decodeData(); } catch (e) { D = null; console.error(e); }
+  LANG = (D && D.l) || ((tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code) === "en" ? "en" : "ru");
+  $("tab-sched").textContent = T("Schedule", "Расписание");
+  $("tab-fin").textContent = T("Money", "Деньги");
+  $("tab-trans").textContent = T("City", "Город");
+  $("resetbtn").textContent = T("Discard", "Сбросить");
+  if (!D) {
+    $("main").innerHTML = `<div class="card empty">${T("Open this app from the <b>📱</b> button in the bot chat (send /app to get it).",
+      "Откройте приложение кнопкой <b>📱 Приложение</b> в чате с ботом (отправьте /app, чтобы её получить).")}</div>`;
+    return;
+  }
+  initModel();
+  document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
+  $("sheetbg").onclick = closeSheet;
+  $("savebtn").onclick = save;
+  $("resetbtn").onclick = () => { initModel(); tmpId = -1; refresh(); toast(T("Changes discarded", "Изменения сброшены")); };
+  if (tg && tg.MainButton) tg.MainButton.onClick(save);
+  if (tg && tg.BackButton) tg.BackButton.onClick(closeSheet);
+  refresh();
+})();
+</script>
+</body>
+</html>
